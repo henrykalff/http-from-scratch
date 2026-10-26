@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"httpServer/internal/http1"
-	"log"
 	"net/http"
 )
 
@@ -24,10 +23,7 @@ func main() {
 		w.Header().Set("Date", "Fri, 09 Apr 2021 13:34:03 GMT")
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-		log.Println("Before Write")
-		log.Println(w.Write(data))
-
-		// fmt.Fprintf(w, "hello")
+		w.Write(data)
 	})
 	if err := http1.ListenAndServe(addr, nil); err != nil {
 		panic(err)

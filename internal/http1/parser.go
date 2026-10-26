@@ -23,23 +23,23 @@ var VALIDHTTPMethods = map[string]string{
 
 // const requestLine = 114 101 113 117 101 115 116 45 108 105 110 101
 func ParseRequest(reader *bufio.Reader) (*http.Request, error) {
-	req := http.Request{}
-	err1 := startLine(&req, reader)
-	if err1 != nil {
-		return &http.Request{}, err1
+	req := http.Request{
+		Header: make(http.Header),
 	}
 
-	header := http.Header{}
-	err := parseHeader(header, reader)
-	if err != nil {
-
+	if err := parseRequestLine(&req, reader); err != nil {
+		return nil, err
 	}
-	parseHeaderToRequest(header, &req)
+
+	if err := parseHeader(&req, reader); err != nil {
+		return nil, err
+	}
+
 	parseBody(&req, reader)
 	return &req, nil
 }
 
-func startLine(req *http.Request, reader *bufio.Reader) error {
+func parseRequestLine(req *http.Request, reader *bufio.Reader) error {
 	line, _, err := reader.ReadLine()
 	if err != nil {
 		return err
@@ -80,35 +80,53 @@ func startLine(req *http.Request, reader *bufio.Reader) error {
 
 var CRLF = []byte("\r\n")
 
-func parseHeader(header http.Header, reader *bufio.Reader) error {
+func parseHeader(req *http.Request, reader *bufio.Reader) error {
+
 	for {
 		line, _, err := reader.ReadLine()
 		if err != nil {
 			return err
 		}
+
 		if bytes.Equal(line, CRLF) || len(line) == 0 {
 			break
 		}
-		decoded_line := string(line)
-		before, after, found := strings.Cut(decoded_line, ":")
-		log.Println(decoded_line)
-		log.Println(before, after, found)
+
+		fieldName, fieldValue, found := strings.Cut(string(line), ":")
 
 		if !found {
 			return errors.New("MethodNotFound")
 		}
-		header.Add(before, after)
+		fieldName = strings.TrimSpace(fieldName)
+		fieldValue = strings.TrimSpace(fieldValue)
+		log.Printf("FieldName: %s, FieldValue: %s\n", fieldName, fieldValue)
+		req.Header.Add(fieldName, fieldValue)
 	}
-	return nil
-}
 
-func parseHeaderToRequest(header http.Header, req *http.Request) error {
-	if field, exists := header["Content-Length"]; exists {
-		contentLength, err := strconv.ParseInt(field[0], 10, 64)
-		if err != nil {
-			return err
+	host := req.Header.Get("Host")
+	if host == "" {
+		return errors.New("HTTP/1.1 requires Host field")
+	}
+	req.Host = host
+	req.Header.Del("Host")
+
+	if transferEncoding := req.Header.Get("Transfer-Encoding"); transferEncoding != "" {
+		req.TransferEncoding = strings.Split(transferEncoding, ",")
+		for i := range req.TransferEncoding {
+			req.TransferEncoding[i] = strings.TrimSpace(req.TransferEncoding[i])
 		}
-		req.ContentLength = contentLength
+		req.Header.Del("Transfer-Encoding")
+	}
+
+	if contentLength := req.Header.Get("Content-Length"); contentLength != "" {
+		val, err := strconv.ParseInt(strings.TrimSpace(contentLength), 10, 64)
+		if err != nil || val < 0 {
+			return errors.New("invalid Content Length")
+		}
+		req.ContentLength = val
+		req.Header.Del("Content-Length")
+	} else {
+		req.ContentLength = 0
 	}
 
 	return nil

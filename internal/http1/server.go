@@ -35,6 +35,7 @@ func HandleConnection(conn net.Conn, mux http.Handler) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("%v\n", req)
 	resp := NewResponse(conn)
 	mux.ServeHTTP(resp, req)
 
