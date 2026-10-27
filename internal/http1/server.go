@@ -68,7 +68,7 @@ func HandleConnection(conn net.Conn, mux http.Handler) error {
 			_ = req.Body.Close()
 		}
 
-		if err := resp.finish(conn); err != nil {
+		if err := resp.flush(conn); err != nil {
 			return err
 		}
 		log.Println("Is closed set:", req.Close)

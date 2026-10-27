@@ -38,8 +38,8 @@ func (r *Response) WriteHeader(statusCode int) {
 	r.statusCode = statusCode
 }
 
-// finish writes the framed response to the network connection.
-func (r *Response) finish(w io.Writer) error {
+// flush writes the framed response to the network connection.
+func (r *Response) flush(w io.Writer) error {
 	log.Printf("%v", r)
 	body := r.buf.Bytes()
 	if r.request.Method == http.MethodHead {

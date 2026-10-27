@@ -46,33 +46,55 @@ func ParseRequest(reader *bufio.Reader) (*http.Request, error) {
 }
 
 func parseRequestLine(req *http.Request, reader *bufio.Reader) error {
-	line, _, err := reader.ReadLine()
+	line, err := readCRLFLine(reader)
 	if err != nil {
 		return err
 	}
-	decodedLine := string(line)
-	decodedSplittedLine := strings.Split(decodedLine, " ")
+	decodedSplittedLine := strings.Split(line, " ")
 
 	if len(decodedSplittedLine) != 3 {
 		return errors.New("BadRequest")
 	}
 
 	// Parse HTTPMethod to request
-	method, exists := VALIDHTTPMethods[strings.ToUpper(decodedSplittedLine[0])]
+	if err := parseHttpMethod(decodedSplittedLine[0], req); err != nil {
+		return err
+	}
+
+	// Parse Url
+	if err := parseTargetResource(decodedSplittedLine[1], req); err != nil {
+		return err
+	}
+
+	// Parse Http Method
+	if err := parseHttpProto(decodedSplittedLine[2], req); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func parseHttpMethod(method string, req *http.Request) error {
+	method, exists := VALIDHTTPMethods[strings.ToUpper(method)]
 	if !exists {
 		return errors.New("MethodNotFound")
 	}
 	req.Method = method
+	return nil
+}
 
-	// Parse Url
-	parsedURL, errParseUrl := url.Parse(decodedSplittedLine[1])
+func parseTargetResource(targetResource string, req *http.Request) error {
+	parsedURL, errParseUrl := url.Parse(targetResource)
 	if nil != errParseUrl {
 		return errParseUrl
 	}
 	req.URL = parsedURL
+	return nil
+}
 
-	req.Proto = decodedSplittedLine[2]
-	protoVersion := strings.Split(decodedSplittedLine[2], "/")
+func parseHttpProto(proto string, req *http.Request) error {
+	req.Proto = proto
+	protoVersion := strings.Split(proto, "/")
 	if protoVersion[0] != "HTTP" {
 		return ErrBadRequest
 	}
@@ -91,17 +113,37 @@ func parseRequestLine(req *http.Request, reader *bufio.Reader) error {
 	return nil
 }
 
-var CRLF = []byte("\r\n")
-
 func parseHeader(req *http.Request, reader *bufio.Reader) error {
 
+	if err := parseAllToRequestHeader(reader, req); err != nil {
+		return err
+	}
+
+	if err := checkAndParseHost(req); err != nil {
+		return err
+	}
+
+	if err := checkAndParseTransferEncoding(req); err != nil {
+		return err
+	}
+
+	if err := checkAndParseContentLength(req); err != nil {
+		return err
+	}
+
+	parseClose(req)
+
+	return nil
+}
+
+func parseAllToRequestHeader(reader *bufio.Reader, req *http.Request) error {
 	for {
-		line, _, err := reader.ReadLine()
+		line, err := readCRLFLine(reader)
 		if err != nil {
 			return err
 		}
 
-		if bytes.Equal(line, CRLF) || len(line) == 0 {
+		if line == "" {
 			break
 		}
 
@@ -115,14 +157,20 @@ func parseHeader(req *http.Request, reader *bufio.Reader) error {
 		// log.Printf("FieldName: %s, FieldValue: %s\n", fieldName, fieldValue)
 		req.Header.Add(fieldName, fieldValue)
 	}
+	return nil
+}
 
+func checkAndParseHost(req *http.Request) error {
 	host := req.Header.Get("Host")
 	if host == "" {
 		return errors.New("HTTP/1.1 requires Host field")
 	}
 	req.Host = host
 	req.Header.Del("Host")
+	return nil
+}
 
+func checkAndParseTransferEncoding(req *http.Request) error {
 	if transferEncoding := req.Header.Get("Transfer-Encoding"); transferEncoding != "" {
 		req.TransferEncoding = strings.Split(transferEncoding, ",")
 		for i := range req.TransferEncoding {
@@ -130,6 +178,10 @@ func parseHeader(req *http.Request, reader *bufio.Reader) error {
 		}
 		req.Header.Del("Transfer-Encoding")
 	}
+	return nil
+}
+
+func checkAndParseContentLength(req *http.Request) error {
 	if arrContentLength := req.Header.Values("Content-Length"); len(arrContentLength) > 1 {
 		first_cl := arrContentLength[0]
 		for _, cl := range arrContentLength {
@@ -148,9 +200,6 @@ func parseHeader(req *http.Request, reader *bufio.Reader) error {
 	} else {
 		req.ContentLength = 0
 	}
-
-	parseClose(req)
-
 	return nil
 }
 
