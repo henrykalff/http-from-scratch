@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -39,6 +40,7 @@ func (r *Response) WriteHeader(statusCode int) {
 
 // finish writes the framed response to the network connection.
 func (r *Response) finish(w io.Writer) error {
+	log.Printf("%v", r)
 	body := r.buf.Bytes()
 	if r.request.Method == http.MethodHead {
 		body = nil

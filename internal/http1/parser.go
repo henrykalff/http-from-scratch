@@ -130,7 +130,14 @@ func parseHeader(req *http.Request, reader *bufio.Reader) error {
 		}
 		req.Header.Del("Transfer-Encoding")
 	}
-
+	if arrContentLength := req.Header.Values("Content-Length"); len(arrContentLength) > 1 {
+		first_cl := arrContentLength[0]
+		for _, cl := range arrContentLength {
+			if first_cl != cl {
+				return fmt.Errorf("%w: Conflicting Content-Length Headers.", ErrBadRequest)
+			}
+		}
+	}
 	if contentLength := req.Header.Get("Content-Length"); contentLength != "" {
 		val, err := strconv.ParseInt(strings.TrimSpace(contentLength), 10, 64)
 		if err != nil || val < 0 {
@@ -168,6 +175,7 @@ func parseBody(req *http.Request, reader *bufio.Reader) error {
 	}
 
 	if req.ContentLength == 0 {
+		req.Body = http.NoBody
 		return nil
 	}
 	_, err := reader.Peek(int(req.ContentLength))
@@ -216,23 +224,26 @@ func (cr *chunkedReader) Read(p []byte) (int, error) {
 	}
 
 	if cr.remaining == 0 {
-		chunkSizeS, err := readCRLFLine(cr.reader)
+		chunkSizeWithExtS, err := readCRLFLine(cr.reader)
 		if err != nil {
 			return 0, fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
 		}
-		chunkSize, err := strconv.ParseInt(string(chunkSizeS), 16, 64)
+		stringChunkSize, _, _ := strings.Cut(chunkSizeWithExtS, ";")
+		chunkSize, err := strconv.ParseInt(string(stringChunkSize), 16, 64)
 		log.Println(chunkSize)
 		if err != nil || chunkSize < 0 {
 			return 0, fmt.Errorf("%w: Could Not Parse Chunked Size", ErrBadRequest)
 		}
 		if chunkSize == 0 {
 			cr.done = true
-			emptyChunkTrailer, err := readCRLFLine(cr.reader)
-			if err != nil {
-				return 0, fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
-			}
-			if len(emptyChunkTrailer) != 0 {
-				return 0, fmt.Errorf("%w: Last Trailer is not empty", ErrBadRequest)
+			for {
+				chunkTrailer, err := readCRLFLine(cr.reader)
+				if err != nil {
+					return 0, fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
+				}
+				if chunkTrailer == "" {
+					break
+				}
 			}
 			return 0, io.EOF
 		}
