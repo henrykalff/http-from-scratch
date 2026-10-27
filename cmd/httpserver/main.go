@@ -25,7 +25,13 @@ func main() {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.Write(data)
 	})
+	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len("hello")))
+		fmt.Fprintf(w, "hello")
+
+	})
 	if err := http1.ListenAndServe(addr, nil); err != nil {
 		panic(err)
 	}
+
 }

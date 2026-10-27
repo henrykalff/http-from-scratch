@@ -1,23 +1,27 @@
 package http1
 
 import (
+	"bytes"
 	"fmt"
-	"net"
+	"io"
 	"net/http"
+	"strconv"
 )
 
 type Response struct {
-	conn        net.Conn
-	StatusCode  int
-	bytes       int
-	header      http.Header
-	wroteHeader bool
+	request    *http.Request
+	header     http.Header
+	statusCode int
+	buf        bytes.Buffer
+	closeConn  bool
 }
 
-func NewResponse(conn net.Conn) *Response {
+func NewResponse(req *http.Request, closeConn bool) *Response {
 	return &Response{
-		conn:   conn,
-		header: make(http.Header),
+		request:    req,
+		header:     make(http.Header),
+		statusCode: http.StatusOK,
+		closeConn:  closeConn,
 	}
 }
 
@@ -25,36 +29,53 @@ func (r *Response) Header() http.Header {
 	return r.header
 }
 
-func (r *Response) Write(data []byte) (n int, err error) {
-	if !r.wroteHeader {
-		r.WriteHeader(200)
-	}
-
-	n, err = r.conn.Write(data)
-	r.bytes += n
-	return n, err
+func (r *Response) Write(data []byte) (int, error) {
+	return r.buf.Write(data)
 }
 
 func (r *Response) WriteHeader(statusCode int) {
-	if r.wroteHeader {
-		return
+	r.statusCode = statusCode
+}
+
+// finish writes the framed response to the network connection.
+func (r *Response) finish(w io.Writer) error {
+	body := r.buf.Bytes()
+	if r.request.Method == http.MethodHead {
+		body = nil
 	}
 
-	r.StatusCode = statusCode
-	r.wroteHeader = true
+	// Set Content-Length if not already specified
+	if r.header.Get("Content-Length") == "" && r.header.Get("Transfer-Encoding") == "" {
+		r.header.Set("Content-Length", strconv.Itoa(len(body)))
+	}
 
-	statusText := http.StatusText(statusCode)
+	if r.closeConn {
+		r.header.Set("Connection", "close")
+	}
 
-	statusLine := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText)
+	proto := r.request.Proto
+	if proto == "" {
+		proto = "HTTP/1.1"
+	}
 
-	r.conn.Write([]byte(statusLine))
+	// Write status line
+	if _, err := fmt.Fprintf(w, "%s %d %s\r\n", proto, r.statusCode, http.StatusText(r.statusCode)); err != nil {
+		return err
+	}
 
-	for key, values := range r.header {
-		for _, val := range values {
-			line := fmt.Sprintf("%s: %s\r\n", key, val)
-			r.conn.Write([]byte(line))
+	// Write headers
+	if err := r.header.Write(w); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, "\r\n"); err != nil {
+		return err
+	}
+
+	// Write body
+	if len(body) > 0 {
+		if _, err := w.Write(body); err != nil {
+			return err
 		}
 	}
-
-	r.conn.Write([]byte("\r\n"))
+	return nil
 }
