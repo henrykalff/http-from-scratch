@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,6 +41,7 @@ func ParseRequest(reader *bufio.Reader) (*http.Request, error) {
 	if err := parseBody(&req, reader); err != nil {
 		return nil, err
 	}
+
 	return &req, nil
 }
 
@@ -131,6 +131,10 @@ func parseHeader(req *http.Request, reader *bufio.Reader) error {
 		return err
 	}
 
+	// if err := parseBody(req, reader); err != nil {
+	// 	return err
+	// }
+
 	parseClose(req)
 
 	return nil
@@ -154,7 +158,6 @@ func parseAllToRequestHeader(reader *bufio.Reader, req *http.Request) error {
 		}
 		fieldName = strings.TrimSpace(fieldName)
 		fieldValue = strings.TrimSpace(fieldValue)
-		// log.Printf("FieldName: %s, FieldValue: %s\n", fieldName, fieldValue)
 		req.Header.Add(fieldName, fieldValue)
 	}
 	return nil
@@ -213,12 +216,9 @@ func parseClose(req *http.Request) {
 func parseBody(req *http.Request, reader *bufio.Reader) error {
 	for _, enc := range req.TransferEncoding {
 		if strings.EqualFold(enc, "chunked") {
-			cr := &chunkedReader{reader: reader}
-			body, err := io.ReadAll(cr)
-			if err != nil {
+			if err := parseChunkedBody(req, reader); err != nil {
 				return err
 			}
-			req.Body = io.NopCloser(bytes.NewReader(body))
 			return nil
 		}
 	}
@@ -229,7 +229,6 @@ func parseBody(req *http.Request, reader *bufio.Reader) error {
 	}
 	_, err := reader.Peek(int(req.ContentLength))
 	if err != nil {
-		log.Println("Too short.")
 		return fmt.Errorf("%w: Content-Length is too short.", ErrBadRequest)
 	}
 	limited := io.LimitReader(reader, req.ContentLength)
@@ -238,91 +237,91 @@ func parseBody(req *http.Request, reader *bufio.Reader) error {
 }
 
 func readCRLFLine(reader *bufio.Reader) (string, error) {
+	line, err := readCRLFLineBytes(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(line), nil
+}
+
+func readCRLFLineBytes(reader *bufio.Reader) ([]byte, error) {
 	var line []byte
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
-			return "", err
+			return []byte{}, err
 		}
 		if b == '\r' {
 			next, err := reader.ReadByte()
 			if err != nil {
-				return "", err
+				return []byte{}, err
 			}
 			if next == '\n' {
-				return string(line), nil
+				return line, nil
 			}
-			return "", fmt.Errorf("%w: bare CR", ErrBadRequest)
+			return []byte{}, fmt.Errorf("%w: bare CR", ErrBadRequest)
 		}
 		if b == '\n' {
-			return "", fmt.Errorf("%w: bare CR", ErrBadRequest)
+			return []byte{}, fmt.Errorf("%w: bare LF", ErrBadRequest)
 		}
 		line = append(line, b)
 	}
 }
+func parseChunkedBody(req *http.Request, reader *bufio.Reader) error {
+	var body []byte
 
-type chunkedReader struct {
-	reader    *bufio.Reader
-	remaining int64
-	done      bool
-}
-
-func (cr *chunkedReader) Read(p []byte) (int, error) {
-	if cr.done {
-		return 0, io.EOF
-	}
-
-	if cr.remaining == 0 {
-		chunkSizeWithExtS, err := readCRLFLine(cr.reader)
+	for {
+		chunkHeader, err := readCRLFLine(reader)
 		if err != nil {
-			return 0, fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
+			return fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
 		}
-		stringChunkSize, _, _ := strings.Cut(chunkSizeWithExtS, ";")
-		chunkSize, err := strconv.ParseInt(string(stringChunkSize), 16, 64)
-		log.Println(chunkSize)
+
+		stringChunkSize, _, _ := strings.Cut(chunkHeader, ";")
+		stringChunkSize = strings.TrimSpace(stringChunkSize)
+		if stringChunkSize == "" {
+			return fmt.Errorf("%w: empty chunk size", ErrBadRequest)
+		}
+
+		chunkSize, err := strconv.ParseInt(stringChunkSize, 16, 64)
 		if err != nil || chunkSize < 0 {
-			return 0, fmt.Errorf("%w: Could Not Parse Chunked Size", ErrBadRequest)
+			return fmt.Errorf("%w: could not parse chunk size", ErrBadRequest)
 		}
+
+		// Terminal Chunk (0\r\n)
 		if chunkSize == 0 {
-			cr.done = true
 			for {
-				chunkTrailer, err := readCRLFLine(cr.reader)
+				chunkTrailer, err := readCRLFLine(reader)
 				if err != nil {
-					return 0, fmt.Errorf("%w: truncated chunk header", ErrBadRequest)
+					return fmt.Errorf("%w: truncated chunk trailer", ErrBadRequest)
 				}
+				// Empty line marks end of trailers
 				if chunkTrailer == "" {
-					break
+					req.Body = io.NopCloser(bytes.NewReader(body))
+					return nil
 				}
 			}
-			return 0, io.EOF
 		}
-		cr.remaining = chunkSize
-	}
 
-	toRead := int64(len(p))
-	if toRead > cr.remaining {
-		toRead = cr.remaining
-	}
+		// Read chunk data
+		chunkData := make([]byte, chunkSize)
+		if _, err := io.ReadFull(reader, chunkData); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return fmt.Errorf("%w: chunk body truncated", ErrBadRequest)
+			}
+			return err
+		}
+		body = append(body, chunkData...)
 
-	n, err := cr.reader.Read(p[:toRead])
-	cr.remaining -= int64(n)
-	if cr.remaining == 0 && err == nil {
-		crlf, err := readCRLFLine(cr.reader)
-		if err != nil || crlf != "" {
-			return n, fmt.Errorf("%w: missing CRLF after chunk data", ErrBadRequest)
+		// Read mandatory trailing CRLF
+		crlf := make([]byte, 2)
+		if _, err := io.ReadFull(reader, crlf); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return fmt.Errorf("%w: missing CRLF after chunk", ErrBadRequest)
+			}
+			return err
+		}
+		if crlf[0] != '\r' || crlf[1] != '\n' {
+			return fmt.Errorf("%w: invalid chunk delimiter", ErrBadRequest)
 		}
 	}
-
-	if err != nil {
-		if errors.Is(err, io.EOF) && cr.remaining > 0 {
-			return n, fmt.Errorf("%w: chunk body truncted", ErrBadRequest)
-		}
-		return n, err
-	}
-	return n, nil
-
-}
-
-func (cr *chunkedReader) Close() error {
-	return nil
 }
