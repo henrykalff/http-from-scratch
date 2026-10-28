@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"httpServer/internal/metrics"
 	"io"
 	"log"
 	"net"
@@ -48,6 +49,7 @@ func HandleConnection(conn net.Conn, mux http.Handler) error {
 			return err
 		}
 
+		metrics.RequestsTotal.Inc()
 		req, err := ParseRequest(br)
 
 		if err != nil {

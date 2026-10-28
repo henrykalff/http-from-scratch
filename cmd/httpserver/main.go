@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"httpServer/internal/http1"
+	"httpServer/internal/metrics"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 const addr = ":8080"
 
 func main() {
+	metrics.InitMetrics()
+
 	http1.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 
 		data := []byte(`<html>
@@ -35,6 +38,9 @@ func main() {
 	http1.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		log.Println(r.Body)
 		_, _ = io.Copy(w, r.Body)
+	})
+	http1.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
+		metrics.WriteMetrics(w)
 	})
 	if err := http1.ListenAndServe(addr, nil); err != nil {
 		panic(err)
