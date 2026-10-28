@@ -11,7 +11,7 @@ import (
 const addr = ":8080"
 
 func main() {
-	http.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 
 		data := []byte(`<html>
 		<head>
@@ -27,12 +27,12 @@ func main() {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.Write(data)
 	})
-	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len("hello")))
 		fmt.Fprintf(w, "hello")
 
 	})
-	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		log.Println(r.Body)
 		_, _ = io.Copy(w, r.Body)
 	})

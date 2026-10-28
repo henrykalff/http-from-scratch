@@ -18,7 +18,8 @@ func ListenAndServe(addr string, handler http.Handler) error {
 	defer listener.Close()
 
 	if handler == nil {
-		handler = http.DefaultServeMux
+		// handler = http.DefaultServeMux
+		handler = DefaultRouter
 	}
 
 	for {
