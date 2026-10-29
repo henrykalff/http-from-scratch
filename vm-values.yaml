@@ -1,0 +1,30 @@
+
+# vm-values.yaml
+
+# Scale down retention for local dev to save disk space
+vmsingle:
+  spec:
+    retentionPeriod: "1d"
+    storage:
+      resources:
+        requests:
+          storage: 2Gi
+
+# Grafana configuration
+grafana:
+  enabled: true
+  adminPassword: "admin"
+  ingress:
+    enabled: false # Keep false if using port-forward, or set true with ingressClassName: nginx
+
+# Disable alertmanager if you only need metrics & dashboards
+vmalert:
+  enabled: false
+alertmanager:
+  enabled: false
+
+# Node exporter and kube-state-metrics for cluster health
+nodeExporter:
+  enabled: true
+kubeStateMetrics:
+  enabled: true

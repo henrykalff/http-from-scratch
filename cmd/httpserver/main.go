@@ -14,7 +14,7 @@ const addr = ":8080"
 func main() {
 	metrics.InitMetrics()
 
-	http1.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("GET /index.html", func(w http.ResponseWriter, r *http.Request) {
 
 		data := []byte(`<html>
 		<head>
@@ -30,16 +30,16 @@ func main() {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.Write(data)
 	})
-	http1.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("GET /hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len("hello")))
 		fmt.Fprintf(w, "hello")
 
 	})
-	http1.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
+	http1.HandleFunc("PUT /echo", func(w http.ResponseWriter, r *http.Request) {
 		log.Println(r.Body)
 		_, _ = io.Copy(w, r.Body)
 	})
-	http1.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
+	http1.HandleFunc("GET /metrics", func(w http.ResponseWriter, req *http.Request) {
 		metrics.WriteMetrics(w)
 	})
 	if err := http1.ListenAndServe(addr, nil); err != nil {

@@ -2,7 +2,6 @@ package http1
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 )
@@ -28,34 +27,32 @@ func HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)
 func Handle(pattern string, handler Handler) {
 	if !isRouterSet {
 		isRouterSet = true
-		defaultRouter = Router{routes: make(map[string]Handler)}
+		defaultRouter = Router{routes: NewSegmentTrie()}
 	}
 	defaultRouter.register(pattern, handler)
 }
 
+type Routes interface {
+	SetRoute(pattern string, handler Handler)
+	Handler(*http.Request) Handler
+}
+
 type Router struct {
-	mu     sync.Mutex
-	routes map[string]Handler
+	mu sync.Mutex
+	// routes map[string]Handler
+	routes Routes
 }
 
 func (r *Router) register(pattern string, handler Handler) {
-	r.setRoute(pattern, handler)
-}
-
-func (r *Router) setRoute(pattern string, handler Handler) {
 	r.mu.Lock()
-	r.routes[pattern] = handler
+	// r.routes[pattern] = handler
+	r.routes.SetRoute(pattern, handler)
 	r.mu.Unlock()
 }
 
 func (r *Router) findRoute(req *http.Request) Handler {
-	for route := range r.routes {
-		log.Println("Route: ", route)
-	}
-	path := req.URL.Path
-
 	r.mu.Lock()
-	h := r.routes[path]
+	h := r.routes.Handler(req)
 	r.mu.Unlock()
 	return h
 }

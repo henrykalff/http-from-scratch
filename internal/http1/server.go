@@ -49,7 +49,7 @@ func HandleConnection(conn net.Conn, mux http.Handler) error {
 			return err
 		}
 
-		metrics.RequestsTotal.Inc()
+		metrics.RequestsTotal.Inc() // Metrics does not work currently in testcases.
 		req, err := ParseRequest(br)
 
 		if err != nil {
