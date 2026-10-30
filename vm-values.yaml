@@ -1,7 +1,5 @@
-
 # vm-values.yaml
 
-# Scale down retention for local dev to save disk space
 vmsingle:
   spec:
     retentionPeriod: "1d"
@@ -10,20 +8,51 @@ vmsingle:
         requests:
           storage: 2Gi
 
-# Grafana configuration
+# VictoriaLogs (optional - keep enabled if you also need logs)
+vlsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "1d"
+    storage:
+      resources:
+        requests:
+          storage: 2Gi
+
+# VictoriaTraces single-node component
+vtsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "1d"
+    storage:
+      resources:
+        requests:
+          storage: 2Gi
+
 grafana:
   enabled: true
+  # Guter Ort für ein PW 😂
   adminPassword: "admin"
-  ingress:
-    enabled: false # Keep false if using port-forward, or set true with ingressClassName: nginx
+  plugins:
+    - victoriametrics-logs-datasource
+  additionalDataSources:
+    # VictoriaLogs datasource
+    - name: VictoriaLogs
+      type: victoriametrics-logs-datasource
+      access: proxy
+      url: http://vlsingle-vm-stack-victoria-metrics-k8s-stack.monitoring.svc.cluster.local:9428
+      isDefault: false
 
-# Disable alertmanager if you only need metrics & dashboards
+    # VictoriaTraces uses the native Jaeger datasource for waterfall visualization
+    - name: VictoriaTraces
+      type: jaeger
+      access: proxy
+      url: http://vtsingle-vm-stack-victoria-metrics-k8s-stack.monitoring.svc.cluster.local:10428
+      isDefault: false
+
 vmalert:
   enabled: false
 alertmanager:
   enabled: false
-
-# Node exporter and kube-state-metrics for cluster health
 nodeExporter:
   enabled: true
 kubeStateMetrics:

@@ -9,6 +9,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func ListenAndServe(addr string, handler http.Handler) error {
@@ -23,6 +26,8 @@ func ListenAndServe(addr string, handler http.Handler) error {
 		handler = DefaultRouter
 	}
 
+	wrappedHandler := otelhttp.NewHandler(handler, "http1server-request")
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -30,7 +35,7 @@ func ListenAndServe(addr string, handler http.Handler) error {
 			continue
 		}
 		go func(c net.Conn) {
-			_ = HandleConnection(conn, handler)
+			_ = HandleConnection(conn, wrappedHandler)
 		}(conn)
 	}
 }
@@ -50,33 +55,45 @@ func HandleConnection(conn net.Conn, mux http.Handler) error {
 		}
 
 		metrics.RequestsTotal.Inc() // Metrics does not work currently in testcases.
-		req, err := ParseRequest(br)
-
+		start := time.Now()
+		shouldEnd, err := handleRequest(conn, br, mux)
+		metrics.RequestProcessingDuration.UpdateDuration(start)
 		if err != nil {
-			if errors.Is(err, ErrUnsupportedVersion) {
-				fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", http.StatusHTTPVersionNotSupported, http.StatusText(http.StatusHTTPVersionNotSupported))
-				return nil
-			}
-
-			status := http.StatusBadRequest
-			fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status, http.StatusText(status))
-			return nil
-		}
-
-		resp := NewResponse(req, req.Close)
-		mux.ServeHTTP(resp, req)
-
-		if req.Body != nil {
-			_, _ = io.Copy(io.Discard, req.Body)
-			_ = req.Body.Close()
-		}
-
-		if err := resp.flush(conn); err != nil {
 			return err
 		}
-		log.Println("Is closed set:", req.Close)
-		if req.Close {
+		if shouldEnd {
 			return nil
 		}
 	}
+}
+
+func handleRequest(conn net.Conn, br *bufio.Reader, mux http.Handler) (bool, error) {
+	req, err := ParseRequest(br)
+
+	if err != nil {
+		if errors.Is(err, ErrUnsupportedVersion) {
+			fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", http.StatusHTTPVersionNotSupported, http.StatusText(http.StatusHTTPVersionNotSupported))
+			return true, nil
+		}
+
+		status := http.StatusBadRequest
+		fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status, http.StatusText(status))
+		return true, nil
+	}
+
+	resp := NewResponse(req, req.Close)
+	mux.ServeHTTP(resp, req)
+
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
+	}
+
+	if err := resp.flush(conn); err != nil {
+		return true, err
+	}
+	if req.Close {
+		return true, nil
+	}
+	return false, nil
 }
